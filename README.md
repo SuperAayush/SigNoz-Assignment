@@ -45,6 +45,11 @@ go mod tidy
 For SigNoz Cloud:
 
 ```bash
+SERVICE_NAME=<service_name> INSECURE_MODE=<true/false> OTEL_EXPORTER_OTLP_HEADERS=signoz-access-token=<SIGNOZ-INGESTION-TOKEN> OTEL_EXPORTER_OTLP_ENDPOINT=ingest.{region}.signoz.cloud:443 go run main.go
+```
+
+For Local Setup:
+```bash
 SERVICE_NAME=<service_name> INSECURE_MODE=<true/false> OTEL_EXPORTER_OTLP_HEADERS=signoz-access-token=<SIGNOZ-INGESTION-TOKEN> OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317 go run main.go
 ```
 
