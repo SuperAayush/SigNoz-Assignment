@@ -54,6 +54,13 @@ SERVICE_NAME=<service_name> INSECURE_MODE=<true/false> OTEL_EXPORTER_OTLP_HEADER
 ```
 
 - Update `<SIGNOZ-INGESTION-TOKEN>` with the [ingestion token](https://signoz.io/docs/ingestion/signoz-cloud/keys/) provided by SigNoz
+- Update `ingest.{region}.signoz.cloud:443` with the ingestion endpoint of your region. Refer to the table below for the same.
+
+| Region | Endpoint                   |
+| ------ | -------------------------- |
+| US     | ingest.us.signoz.cloud:443 |
+| IN     | ingest.in.signoz.cloud:443 |
+| EU     | ingest.eu.signoz.cloud:443 |
 
 ## Testing the Endpoints
 
