@@ -18,8 +18,7 @@ This repository contains a simple Go-based HTTP service simulating an order-proc
 ## Prerequisites
 
 * Go 1.22 or higher.
-* Docker and Docker Compose (for running SigNoz).
-* SigNoz installed locally (follow the SigNoz installation guide).
+* SigNoz installed locally (follow the SigNoz installation guide) or SigNoz cloud access.
 * Environment variables:
    * `OTEL_EXPORTER_OTLP_ENDPOINT`: OTLP collector endpoint (default: localhost:4317 for gRPC).
    * `OTEL_EXPORTER_OTLP_HEADERS`: SigNoz access token if required.
