@@ -83,7 +83,8 @@ Generate traffic to produce telemetry data.
 * **Traces**: View request paths, including custom `db_process_order` spans with events and attributes.
 * **Metrics**: Monitor `orders_processed_total` (by status), HTTP request counts, durations (histograms), and goroutine counts.
 * **Logs**: Correlated with traces via `trace_id` and `span_id` and filter by service or severity.
-<img width="1813" height="980" alt="image" src="https://github.com/user-attachments/assets/a2b0e801-d346-4fd6-a23c-9f375c603e1e" />
+<img width="1332" height="890" alt="image" src="https://github.com/user-attachments/assets/6d60058f-5665-49e9-8eec-93d06f47728b" />
+
 
 
 ## Troubleshooting
