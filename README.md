@@ -2,7 +2,7 @@
 
 This repository contains a simple Go-based HTTP service simulating an order-processing system, fully instrumented with OpenTelemetry for traces, metrics, and logs. The telemetry data is exported to an OTLP collector (e.g., SigNoz) for observability.
 
-<img width="1811" height="544" alt="image" src="https://github.com/user-attachments/assets/baa67eb4-2459-4c2b-8dd1-ca9d0b29c442" />
+<img width="1341" height="423" alt="image" src="https://github.com/user-attachments/assets/1676c6ce-7bb5-4b1a-a6a6-7a4f625d405d" />
 
 ## Features
 
