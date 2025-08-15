@@ -32,7 +32,7 @@ import (
 var (
 	serviceName       = getenvDefault("SERVICE_NAME", "aayush_test_6")
 	collectorURL      = getenvRequired("OTEL_EXPORTER_OTLP_ENDPOINT") // Must be set for SigNoz Cloud
-	accessToken       = os.Getenv("OTEL_EXPORTER_OTLP_HEADERS")       // Example: signoz-access-token=<token>
+	accessToken       = os.Getenv("OTEL_EXPORTER_OTLP_HEADERS")       // Generate from here: https://signoz.io/docs/ingestion/signoz-cloud/keys/
 	ordersProcessed   metric.Int64Counter
 	httpRequestsTotal metric.Int64Counter
 	httpDuration      metric.Float64Histogram
