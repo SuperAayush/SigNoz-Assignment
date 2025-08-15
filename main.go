@@ -6,8 +6,6 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
-	"runtime"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -17,9 +15,8 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
+	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
-	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
@@ -33,18 +30,15 @@ import (
 )
 
 var (
-	serviceName     = getenvDefault("SERVICE_NAME", "aayush_test_4")                 // Service name used in telemetry data
-	collectorURL    = getenvDefault("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4317") // OTLP collector endpoint
-	insecure        = os.Getenv("INSECURE_MODE")                                     // Controls TLS/insecure connection
-	ordersProcessed metric.Int64Counter                                              // Counter for processed orders
-
-	// Additional application metrics
-	httpRequestsTotal metric.Int64Counter         // Counter for HTTP requests
-	httpDuration      metric.Float64Histogram     // Histogram for HTTP request durations
-	goroutinesGauge   metric.Int64ObservableGauge // Gauge for number of goroutines
+	serviceName       = getenvDefault("SERVICE_NAME", "aayush_test_6")
+	collectorURL      = getenvRequired("OTEL_EXPORTER_OTLP_ENDPOINT") // Must be set for SigNoz Cloud
+	accessToken       = os.Getenv("OTEL_EXPORTER_OTLP_HEADERS")       // Example: signoz-access-token=<token>
+	ordersProcessed   metric.Int64Counter
+	httpRequestsTotal metric.Int64Counter
+	httpDuration      metric.Float64Histogram
 )
 
-// getenvDefault returns the value of an environment variable or a default if not set.
+// getenvDefault returns env var value or a default
 func getenvDefault(key, def string) string {
 	v := os.Getenv(key)
 	if v == "" {
@@ -53,34 +47,29 @@ func getenvDefault(key, def string) string {
 	return v
 }
 
-// initTracer configures OpenTelemetry tracing and returns a cleanup function.
-func initTracer() func(context.Context) error {
-	var secureOption otlptracegrpc.Option
-
-	// Determine TLS or insecure connection based on INSECURE_MODE
-	if strings.ToLower(insecure) == "false" || insecure == "0" || strings.ToLower(insecure) == "f" {
-		secureOption = otlptracegrpc.WithTLSCredentials(credentials.NewClientTLSFromCert(nil, ""))
-	} else {
-		secureOption = otlptracegrpc.WithInsecure()
+// getenvRequired ensures a required env var is set
+func getenvRequired(key string) string {
+	v := os.Getenv(key)
+	if v == "" {
+		logrus.Fatalf("Environment variable %s must be set for SigNoz Cloud", key)
 	}
+	return v
+}
 
-	// Create OTLP trace exporter
-	exporter, err := otlptrace.New(
+// initTracer configures tracing over gRPC with TLS
+func initTracer() func(context.Context) error {
+	exporter, err := otlptracegrpc.New(
 		context.Background(),
-		otlptracegrpc.NewClient(
-			secureOption,
-			otlptracegrpc.WithEndpoint(collectorURL),
-			otlptracegrpc.WithHeaders(map[string]string{
-				"signoz-access-token": os.Getenv("OTEL_EXPORTER_OTLP_HEADERS"),
-			}),
-		),
+		otlptracegrpc.WithEndpoint(collectorURL),
+		otlptracegrpc.WithTLSCredentials(credentials.NewClientTLSFromCert(nil, "")),
+		otlptracegrpc.WithHeaders(map[string]string{
+			"signoz-access-token": accessToken,
+		}),
 	)
 	if err != nil {
-		logrus.Errorf("Failed to create trace exporter: %v", err)
-		os.Exit(1)
+		logrus.Fatalf("Failed to create trace exporter: %v", err)
 	}
 
-	// Define resource attributes (service name, language, etc.)
 	resources, err := resource.New(
 		context.Background(),
 		resource.WithAttributes(
@@ -89,68 +78,71 @@ func initTracer() func(context.Context) error {
 		),
 	)
 	if err != nil {
-		logrus.Errorf("Could not set resources: %v", err)
-		os.Exit(1)
+		logrus.Fatalf("Could not set resources: %v", err)
 	}
 
-	// Set tracer provider and global propagator
 	otel.SetTracerProvider(
 		sdktrace.NewTracerProvider(
-			sdktrace.WithSampler(sdktrace.AlwaysSample()), // Always sample traces for demo
-			sdktrace.WithBatcher(exporter),                // Batch export spans
+			sdktrace.WithSampler(sdktrace.AlwaysSample()),
+			sdktrace.WithBatcher(exporter),
 			sdktrace.WithResource(resources),
 		),
 	)
-	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
-
+	otel.SetTextMapPropagator(
+		propagation.NewCompositeTextMapPropagator(
+			propagation.TraceContext{},
+			propagation.Baggage{},
+		),
+	)
 	return exporter.Shutdown
 }
 
-// initLogger configures OpenTelemetry logging integration with logrus.
+// initLogger configures logging over gRPC with TLS
 func initLogger() func(context.Context) error {
-	// Create OTLP log exporter over HTTP
-	logExporter, err := otlploghttp.New(
-		context.Background(),
-		otlploghttp.WithEndpoint("localhost:4318"),
-		otlploghttp.WithHeaders(map[string]string{
-			"signoz-access-token": os.Getenv("OTEL_EXPORTER_OTLP_HEADERS"),
+	ctx := context.Background()
+
+	logExporter, err := otlploggrpc.New(
+		ctx,
+		otlploggrpc.WithEndpoint(collectorURL),
+		otlploggrpc.WithTLSCredentials(credentials.NewClientTLSFromCert(nil, "")),
+		otlploggrpc.WithHeaders(map[string]string{
+			"signoz-access-token": accessToken,
 		}),
 	)
 	if err != nil {
-		logrus.Errorf("Failed to create log exporter: %v", err)
-		os.Exit(1)
+		logrus.Fatalf("Failed to create log exporter: %v", err)
 	}
 
-	// Set logger provider with batch processor
 	logProvider := otel_log.NewLoggerProvider(
-		otel_log.WithProcessor(
-			otel_log.NewBatchProcessor(logExporter),
-		),
+		otel_log.WithProcessor(otel_log.NewBatchProcessor(logExporter)),
 	)
-
-	// Add OpenTelemetry hook to logrus
+	// Bridge Logrus -> OTel Logs
 	hook := otellogrus.NewHook(serviceName, otellogrus.WithLoggerProvider(logProvider))
 	logrus.AddHook(hook)
 
 	return logProvider.Shutdown
 }
 
-// initMeter configures OpenTelemetry metrics and application-specific instruments.
+// initMeter configures metrics over gRPC with TLS
 func initMeter() func(context.Context) error {
-	var secureOption otlpmetricgrpc.Option
+	ctx := context.Background()
 
-	// Determine TLS or insecure connection for metrics
-	if strings.ToLower(insecure) == "false" || insecure == "0" || strings.ToLower(insecure) == "f" {
-		secureOption = otlpmetricgrpc.WithTLSCredentials(credentials.NewClientTLSFromCert(nil, ""))
-	} else {
-		secureOption = otlpmetricgrpc.WithInsecure()
+	// Define resource with service metadata
+	res, err := resource.New(ctx,
+		resource.WithAttributes(
+			semconv.ServiceNameKey.String(serviceName),
+		),
+	)
+	if err != nil {
+		logrus.Errorf("Failed to create resource: %v", err)
+		os.Exit(1)
 	}
 
-	// Create OTLP metric exporter
+	// Create OTLP metric exporter over gRPC + TLS
 	exporter, err := otlpmetricgrpc.New(
-		context.Background(),
+		ctx,
 		otlpmetricgrpc.WithEndpoint(collectorURL),
-		secureOption,
+		otlpmetricgrpc.WithTLSCredentials(credentials.NewClientTLSFromCert(nil, "")),
 		otlpmetricgrpc.WithHeaders(map[string]string{
 			"signoz-access-token": os.Getenv("OTEL_EXPORTER_OTLP_HEADERS"),
 		}),
@@ -160,86 +152,52 @@ func initMeter() func(context.Context) error {
 		os.Exit(1)
 	}
 
-	// Resource attributes for metrics
-	resources, err := resource.New(
-		context.Background(),
-		resource.WithAttributes(
-			attribute.String("service.name", serviceName),
-			attribute.String("library.language", "go"),
-		),
-	)
-	if err != nil {
-		logrus.Errorf("Could not set resources: %v", err)
-		os.Exit(1)
-	}
-
-	// Create and set meter provider
+	// Create MeterProvider with shorter export interval (10s instead of 60s)
 	meterProvider := sdkmetric.NewMeterProvider(
-		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(exporter)), // Push metrics periodically
-		sdkmetric.WithResource(resources),
-		// Configure histogram buckets for HTTP request duration
-		sdkmetric.WithView(sdkmetric.NewView(
-			sdkmetric.Instrument{Name: "http_server_duration_seconds"},
-			sdkmetric.Stream{Aggregation: sdkmetric.AggregationExplicitBucketHistogram{
-				Boundaries: []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10},
-			}},
+		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(exporter,
+			sdkmetric.WithInterval(10*time.Second),
 		)),
+		sdkmetric.WithResource(res),
 	)
+
+	// Register global meter provider
 	otel.SetMeterProvider(meterProvider)
 
-	meter := otel.Meter(serviceName)
-
-	// Create application metrics instruments
+	// Create counter
+	meter := meterProvider.Meter(serviceName)
 	ordersProcessed, err = meter.Int64Counter(
 		"orders_processed_total",
 		metric.WithDescription("Total number of orders processed"),
-		metric.WithUnit("1"),
 	)
 	if err != nil {
-		logrus.Fatalf("Failed to create orders_processed_total counter: %v", err)
+		logrus.Errorf("Failed to create counter: %v", err)
+		os.Exit(1)
 	}
 
 	httpRequestsTotal, err = meter.Int64Counter(
-		"http_server_requests_total",
-		metric.WithDescription("Total number of HTTP server requests"),
-		metric.WithUnit("1"),
+		"http_requests_total",
+		metric.WithDescription("Total number of HTTP requests"),
 	)
 	if err != nil {
-		logrus.Fatalf("Failed to create http_server_requests_total counter: %v", err)
+		logrus.Errorf("Failed to create http_requests_total counter: %v", err)
+		os.Exit(1)
 	}
 
 	httpDuration, err = meter.Float64Histogram(
-		"http_server_duration_seconds",
-		metric.WithDescription("Duration of HTTP server requests in seconds"),
-		metric.WithUnit("s"),
+		"http_duration_seconds",
+		metric.WithDescription("Duration of HTTP requests in seconds"),
 	)
 	if err != nil {
-		logrus.Fatalf("Failed to create http_server_duration_seconds histogram: %v", err)
+		logrus.Errorf("Failed to create http_duration_seconds histogram: %v", err)
+		os.Exit(1)
 	}
 
-	// Observable gauge for runtime goroutines
-	goroutinesGauge, err = meter.Int64ObservableGauge(
-		"go.runtime.goroutines",
-		metric.WithDescription("Number of goroutines"),
-		metric.WithUnit("1"),
-	)
-	if err != nil {
-		logrus.Fatalf("Failed to create go.runtime.goroutines gauge: %v", err)
-	}
-
-	// Register callback to update goroutines gauge
-	_, err = meter.RegisterCallback(func(_ context.Context, o metric.Observer) error {
-		o.ObserveInt64(goroutinesGauge, int64(runtime.NumGoroutine()))
-		return nil
-	}, goroutinesGauge)
-	if err != nil {
-		logrus.Fatalf("Failed to register callback for goroutines gauge: %v", err)
-	}
+	// Push initial zero so it shows in SigNoz immediately
+	ordersProcessed.Add(ctx, 0)
 
 	return meterProvider.Shutdown
 }
 
-// LogrusFields extracts trace/span IDs from context for structured logging.
 func LogrusFields(ctx context.Context) logrus.Fields {
 	span := oteltrace.SpanFromContext(ctx)
 	if !span.SpanContext().IsValid() {
@@ -251,11 +209,71 @@ func LogrusFields(ctx context.Context) logrus.Fields {
 	}
 }
 
+func metricsMiddleware(c *gin.Context) {
+	start := time.Now()
+	c.Next()
+	duration := time.Since(start).Seconds()
+	operation := c.FullPath()
+	if operation == "" {
+		operation = c.Request.URL.Path
+	}
+	attrs := []attribute.KeyValue{
+		semconv.ServiceNameKey.String(serviceName),
+		semconv.HTTPRouteKey.String(operation),
+		semconv.HTTPRequestMethodKey.String(c.Request.Method),
+		semconv.HTTPResponseStatusCodeKey.Int(c.Writer.Status()),
+	}
+	httpDuration.Record(c.Request.Context(), duration, metric.WithAttributes(attrs...))
+	httpRequestsTotal.Add(c.Request.Context(), 1, metric.WithAttributes(attrs...))
+}
+
+func createOrderHandler(c *gin.Context) {
+	ctx := c.Request.Context()
+	tr := otel.Tracer(serviceName)
+
+	_, dbSpan := tr.Start(ctx, "db_process_order")
+	startDB := time.Now()
+
+	rand.Seed(time.Now().UnixNano())
+	status := "success"
+	if rand.Float64() < 0.9 {
+		time.Sleep(time.Duration(50+rand.Intn(100)) * time.Millisecond)
+		dbSpan.AddEvent("Order creation succeeded")
+	} else {
+		status = "failure"
+		time.Sleep(time.Duration(200+rand.Intn(300)) * time.Millisecond)
+		dbSpan.AddEvent("Order creation failed", oteltrace.WithAttributes(attribute.String("reason", "simulated-failure")))
+		err := fmt.Errorf("simulated order creation failure")
+		dbSpan.RecordError(err)
+		dbSpan.SetStatus(codes.Error, err.Error())
+	}
+	dbSpan.SetAttributes(attribute.Float64("db.duration_ms", float64(time.Since(startDB).Milliseconds())))
+	dbSpan.End()
+
+	ordersProcessed.Add(ctx, 1, metric.WithAttributes(attribute.String("status", status)))
+
+	if status == "success" {
+		logrus.WithContext(ctx).Info("Order created successfully")
+		c.String(http.StatusOK, "Order created successfully")
+	} else {
+		oteltrace.SpanFromContext(ctx).SetAttributes(attribute.String("error", "true"))
+		logrus.WithContext(ctx).Error("Failed to create order")
+		c.String(http.StatusInternalServerError, "Internal Server Error")
+	}
+}
+
+func checkInventoryHandler(c *gin.Context) {
+	ctx := c.Request.Context()
+	rand.Seed(time.Now().UnixNano())
+	delay := time.Duration(200+rand.Intn(600)) * time.Millisecond
+	time.Sleep(delay)
+	logrus.WithContext(ctx).Infof("Inventory checked, delay_ms: %d", delay.Milliseconds())
+	c.String(http.StatusOK, "Inventory checked in %v", delay)
+}
+
 func main() {
-	// Configure logrus to output JSON
 	logrus.SetFormatter(&logrus.JSONFormatter{})
 
-	// Initialize observability components with deferred cleanup
 	cleanupTracer := initTracer()
 	defer cleanupTracer(context.Background())
 
@@ -265,17 +283,11 @@ func main() {
 	cleanupMeter := initMeter()
 	defer cleanupMeter(context.Background())
 
-	// Create new Gin router
 	r := gin.New()
 	r.Use(gin.Recovery())
-
-	// Automatically create spans for incoming requests
 	r.Use(otelgin.Middleware(serviceName))
-
-	// Custom middleware to track request metrics
 	r.Use(metricsMiddleware)
 
-	// Routes
 	r.POST("/createOrder", createOrderHandler)
 	r.GET("/checkInventory", checkInventoryHandler)
 
@@ -283,82 +295,4 @@ func main() {
 	if err := r.Run(":8080"); err != nil {
 		logrus.Errorf("Server failed: %v", err)
 	}
-}
-
-// metricsMiddleware records request count and duration metrics for every request.
-func metricsMiddleware(c *gin.Context) {
-	start := time.Now()
-	c.Next()
-	duration := time.Since(start).Seconds()
-
-	// Determine the route path for labeling metrics
-	operation := c.FullPath()
-	if operation == "" {
-		operation = c.Request.URL.Path
-	}
-
-	attrs := []attribute.KeyValue{
-		semconv.ServiceNameKey.String(serviceName),
-		semconv.HTTPRouteKey.String(operation),
-		semconv.HTTPRequestMethodKey.String(c.Request.Method),
-		semconv.HTTPResponseStatusCodeKey.Int(c.Writer.Status()),
-	}
-
-	httpDuration.Record(c.Request.Context(), duration, metric.WithAttributes(attrs...))
-	httpRequestsTotal.Add(c.Request.Context(), 1, metric.WithAttributes(attrs...))
-}
-
-// createOrderHandler simulates an order creation process with tracing and metrics.
-func createOrderHandler(c *gin.Context) {
-	ctx := c.Request.Context()
-	tr := otel.Tracer(serviceName)
-
-	// Create a child span for the database operation
-	_, dbSpan := tr.Start(ctx, "db_process_order")
-	startDB := time.Now()
-
-	// Simulate order creation with random success/failure
-	rand.Seed(time.Now().UnixNano())
-	status := "success"
-	if rand.Float64() < 0.9 {
-		// Success path with simulated DB delay
-		time.Sleep(time.Duration(50+rand.Intn(100)) * time.Millisecond)
-		dbSpan.AddEvent("Order creation succeeded")
-	} else {
-		// Failure path with longer delay
-		status = "failure"
-		time.Sleep(time.Duration(200+rand.Intn(300)) * time.Millisecond)
-		dbSpan.AddEvent("Order creation failed", oteltrace.WithAttributes(attribute.String("reason", "simulated-failure")))
-		err := fmt.Errorf("simulated order creation failure")
-		dbSpan.RecordError(err)
-		dbSpan.SetStatus(codes.Error, err.Error())
-	}
-
-	// Record DB operation duration
-	dbSpan.SetAttributes(attribute.Float64("db.duration_ms", float64(time.Since(startDB).Milliseconds())))
-	dbSpan.End()
-
-	// Increment processed orders counter
-	ordersProcessed.Add(ctx, 1, metric.WithAttributes(attribute.String("status", status)))
-
-	// Log outcome with trace/span IDs
-	if status == "success" {
-		logrus.WithFields(LogrusFields(ctx)).Info("Order created successfully")
-		c.String(http.StatusOK, "Order created successfully")
-	} else {
-		// Mark parent span as error
-		oteltrace.SpanFromContext(ctx).SetAttributes(attribute.String("error", "true"))
-		logrus.WithFields(LogrusFields(ctx)).Error("Failed to create order")
-		c.String(http.StatusInternalServerError, "Internal Server Error")
-	}
-}
-
-// checkInventoryHandler simulates inventory lookup with random delay.
-func checkInventoryHandler(c *gin.Context) {
-	ctx := c.Request.Context()
-	rand.Seed(time.Now().UnixNano())
-	delay := time.Duration(200+rand.Intn(600)) * time.Millisecond
-	time.Sleep(delay)
-	logrus.WithFields(LogrusFields(ctx)).Infof("Inventory checked, delay_ms: %d", delay.Milliseconds())
-	c.String(http.StatusOK, "Inventory checked in %v", delay)
 }
