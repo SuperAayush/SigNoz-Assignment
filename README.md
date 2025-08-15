@@ -6,31 +6,43 @@ This repository contains a simple Go-based HTTP service simulating an order-proc
 
 ## Features
 
-* HTTP endpoints: `/createOrder` (POST) and `/checkInventory` (GET).
-* Simulates order creation with a 90% success rate and random failures.
-* Variable delays in inventory check to mimic downstream dependencies.
-* OpenTelemetry instrumentation:
-   * Automatic tracing for HTTP requests via Gin middleware.
-   * Manual spans for database simulation in `/createOrder`.
-   * Custom metrics: `orders_processed_total`, `http_server_requests_total`, `http_server_duration_seconds`, and `go.runtime.goroutines` gauge.
-   * Structured logging with Logrus, bridged to OpenTelemetry logs for correlation with traces.
+### HTTP Endpoints:
+- POST `/createOrder` — Simulates order creation with a 90% success rate and random simulated failures.
+- GET `/checkInventory` — Simulates an inventory check with random delay to mimic downstream dependencies.
+
+### OpenTelemetry Instrumentation:
+- Automatic tracing for HTTP requests via `otelgin` middleware.
+- Manual spans for database simulation in `/createOrder`.
+- Metrics:
+    - `orders_processed_total` — Count of orders processed, labeled with status.
+    - `http_requests_total` — Total HTTP requests received.
+    - `http_duration_seconds` — Request duration histogram.
+- Logging:
+    - Structured JSON logging using Logrus.
+    - Logrus bridged to OpenTelemetry logs with automatic trace_id and span_id injection for correlation.
+- GRPC + TLS Export for traces, metrics, and logs directly to SigNoz Cloud or any OTLP-compliant backend.
+- Configurable service name and collector endpoint via environment variables.
 
 ## Prerequisites
 
-* Go 1.22 or higher.
-* SigNoz installed locally (follow the SigNoz installation guide) or SigNoz cloud access.
-* Environment variables:
-   * `OTEL_EXPORTER_OTLP_ENDPOINT`: OTLP collector endpoint (default: localhost:4317 for gRPC).
-   * `OTEL_EXPORTER_OTLP_HEADERS`: SigNoz access token if required.
-   * `INSECURE_MODE`: Set to true for insecure connections (default: secure).
-   * `SERVICE_NAME`: Service name (default: aayush_test_4).
+- Go 1.22 or higher.
+- SigNoz Cloud account (or self-hosted SigNoz instance with OTLP gRPC enabled).
+- Environment variables:
+    - `OTEL_EXPORTER_OTLP_ENDPOINT` — SigNoz OTLP gRPC endpoint (e.g., ingest.{region}.signoz.cloud:443).
+    - `OTEL_EXPORTER_OTLP_HEADERS` — SigNoz Cloud [access token](https://signoz.io/docs/ingestion/signoz-cloud/keys/) in format:
+        ```ini=
+        signoz-access-token=<your-token>
+        ```
+    - `SERVICE_NAME` — Name of this service (default: aayush_test_6).
+- No local collector required — the app connects directly to SigNoz Cloud over gRPC with TLS.
 
 ## Installation
 
 1. Clone the repository:
 
 ```bash
-git clone https://github.com/scaler-aayush/SigNoz-Assignment.git
+https://github.com/SuperAayush/SigNoz-Assignment.git
+cd SigNoz-Assignment
 ```
 
 2. Install dependencies:
@@ -44,12 +56,7 @@ go mod tidy
 For SigNoz Cloud:
 
 ```bash
-SERVICE_NAME=<service_name> INSECURE_MODE=<true/false> OTEL_EXPORTER_OTLP_HEADERS=signoz-access-token=<SIGNOZ-INGESTION-TOKEN> OTEL_EXPORTER_OTLP_ENDPOINT=ingest.{region}.signoz.cloud:443 go run main.go
-```
-
-For Local Setup:
-```bash
-SERVICE_NAME=<service_name> INSECURE_MODE=<true/false> OTEL_EXPORTER_OTLP_HEADERS=signoz-access-token=<SIGNOZ-INGESTION-TOKEN> OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317 go run main.go
+SERVICE_NAME=<service_name> INSECURE_MODE=<true/false> OTEL_EXPORTER_OTLP_HEADERS=<SIGNOZ-INGESTION-TOKEN> OTEL_EXPORTER_OTLP_ENDPOINT=ingest.{region}.signoz.cloud:443 go run main.go
 ```
 
 - Update `<SIGNOZ-INGESTION-TOKEN>` with the [ingestion token](https://signoz.io/docs/ingestion/signoz-cloud/keys/) provided by SigNoz
@@ -82,9 +89,7 @@ Generate traffic to produce telemetry data.
 * **Traces**: View request paths, including custom `db_process_order` spans with events and attributes.
 * **Metrics**: Monitor `orders_processed_total` (by status), HTTP request counts, durations (histograms), and goroutine counts.
 * **Logs**: Correlated with traces via `trace_id` and `span_id` and filter by service or severity.
-<img width="1332" height="890" alt="image" src="https://github.com/user-attachments/assets/6d60058f-5665-49e9-8eec-93d06f47728b" />
-
-
+<img width="1814" height="983" alt="image" src="https://github.com/user-attachments/assets/5b15adcf-8cec-4fac-802f-64a48c272f9e" />
 
 ## Troubleshooting
 
